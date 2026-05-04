@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>領収書スキャナー</title>
+<style>
+  body { font-family: sans-serif; max-width: 600px; margin: 40px auto; padding: 0 20px; }
+  h1 { font-size: 1.4em; }
+  .drop-area { border: 2px dashed #aaa; border-radius: 12px; padding: 40px; text-align: center; cursor: pointer; background: #f9f9f9; }
+  .drop-area.dragover { background: #e8f0fe; border-color: #4285f4; }
+  img#preview { max-width: 100%; margin-top: 16px; border-radius: 8px; display: none; }
+  button { margin-top: 16px; width: 100%; padding: 14px; font-size: 1em; background: #4285f4; color: white; border: none; border-radius: 8px; cursor: pointer; }
+  button:disabled { background: #aaa; }
+  #result { margin-top: 24px; background: #f1f8e9; border-radius: 8px; padding: 16px; display: none; }
+  #error { margin-top: 16px; color: red; display: none; }
+</style>
+</head>
+<body>
+<h1>領収書スキャナー</h1>
+
+<div class="drop-area" id="dropArea">
+  📷 画像をここにドロップ、またはクリックして選択
+  <input type="file" id="fileInput" accept="image/*" style="display:none">
+</div>
+<img id="preview">
+<button id="submitBtn" disabled>スプレッドシートに記録する</button>
+<div id="error"></div>
+<div id="result"></div>
+
+<script>
+  const FLOW_UUID = 'ed9b16f8-8043-43b3-8806-d8f9ddade2d3';
+  const API_KEY   = 'jb_sk-flow-36c4b9fe085d0bf95bc55b0a1d9ac9ca84a569f05fcbcd0d1725d5afd5c0b6a0';
+
+  let base64Data = '';
+
+  const dropArea = document.getElementById('dropArea');
+  const fileInput = document.getElementById('fileInput');
+  const preview   = document.getElementById('preview');
+  const submitBtn = document.getElementById('submitBtn');
+  const resultDiv = document.getElementById('result');
+  const errorDiv  = document.getElementById('error');
+
+  dropArea.addEventListener('click', () => fileInput.click());
+  dropArea.addEventListener('dragover', e => { e.preventDefault(); dropArea.classList.add('dragover'); });
+  dropArea.addEventListener('dragleave', () => dropArea.classList.remove('dragover'));
+  dropArea.addEventListener('drop', e => { e.preventDefault(); dropArea.classList.remove('dragover'); loadFile(e.dataTransfer.files[0]); });
+  fileInput.addEventListener('change', () => loadFile(fileInput.files[0]));
+
+  function loadFile(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = e => {
+      const dataUrl = e.target.result;
+      base64Data = dataUrl.split(',')[1];
+      preview.src = dataUrl;
+      preview.style.display = 'block';
+      submitBtn.disabled = false;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  submitBtn.addEventListener('click', async () => {
+    submitBtn.disabled = true;
+    submitBtn.textContent = '処理中...';
+    resultDiv.style.display = 'none';
+    errorDiv.style.display = 'none';
+
+    try {
+      const res = await fetch(`https://flow.jinba.io/api/v1/flows/${FLOW_UUID}/run`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${API_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          args: [{ name: 'input_base64', value: base64Data }],
+          mode: 'sync'
+        })
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const content = JSON.parse(data.result?.output ?? data.result ?? '{}');
+
+      resultDiv.style.display = 'block';
+      resultDiv.innerHTML = `
+        <strong>✅ 記録しました！</strong><br><br>
+        🏪 <b>店舗名：</b>${content.店舗名 ?? '-'}<br>
+        📅 <b>日付：</b>${content.日付 ?? '-'}<br>
+        🏷 <b>費目：</b>${content.費目 ?? '-'}<br>
+        🛒 <b>商品数：</b>${(content.商品リスト ?? []).length}件
+      `;
+    } catch (e) {
+      errorDiv.style.display = 'block';
+      errorDiv.textContent = 'エラー: ' + e.message;
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'スプレッドシートに記録する';
+    }
+  });
+</script>
+</body>
+</html>
