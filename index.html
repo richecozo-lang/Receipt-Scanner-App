@@ -21,16 +21,16 @@
 
 <div class="drop-area" id="dropArea">
   📷 画像をここにドロップ、またはクリックして選択
-  <input type="file" id="fileInput" accept="image/*" style="display:none">
+  <input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp" style="display:none">
 </div>
-<img id="preview">
+<p><label>利用パスワード <input type="password" id="accessPassword" autocomplete="off"></label></p>
+<p>JPEG・PNG・WebP画像（3MB以下）</p>
+<img id="preview" alt="領収書">
 <button id="submitBtn" disabled>スプレッドシートに記録する</button>
 <div id="error"></div>
 <div id="result"></div>
 
 <script>
-  const FLOW_UUID = 'ed9b16f8-8043-43b3-8806-d8f9ddade2d3';
-  const API_KEY   = 'jb_sk-flow-36c4b9fe085d0bf95bc55b0a1d9ac9ca84a569f05fcbcd0d1725d5afd5c0b6a0';
 
   let base64Data = '';
 
@@ -49,6 +49,15 @@
 
   function loadFile(file) {
     if (!file) return;
+    base64Data = '';
+    submitBtn.disabled = true;
+    preview.style.display = 'none';
+    if (!['image/jpeg','image/png','image/webp'].includes(file.type) || file.size > 3 * 1024 * 1024) {
+      errorDiv.textContent = 'JPEG・PNG・WebP形式の3MB以下の画像を選んでください。';
+      errorDiv.style.display = 'block';
+      return;
+    }
+    errorDiv.style.display = 'none';
     const reader = new FileReader();
     reader.onload = e => {
       const dataUrl = e.target.result;
@@ -67,30 +76,29 @@
     errorDiv.style.display = 'none';
 
     try {
-      const res = await fetch(`https://flow.jinba.io/api/v1/flows/${FLOW_UUID}/run`, {
+      const res = await fetch('/api/receipt', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${API_KEY}`,
+          'Authorization': 'Bearer ' + document.getElementById('accessPassword').value,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          args: [{ name: 'input_base64', value: base64Data }],
-          mode: 'sync'
+          input_base64: base64Data
         })
       });
 
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      const content = JSON.parse(data.result?.output ?? data.result ?? '{}');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+      const raw = data.result?.output ?? data.result ?? {};
+      const content = typeof raw === 'string' ? JSON.parse(raw) : raw;
 
       resultDiv.style.display = 'block';
-      resultDiv.innerHTML = `
-        <strong>✅ 記録しました！</strong><br><br>
-        🏪 <b>店舗名：</b>${content.店舗名 ?? '-'}<br>
-        📅 <b>日付：</b>${content.日付 ?? '-'}<br>
-        🏷 <b>費目：</b>${content.費目 ?? '-'}<br>
-        🛒 <b>商品数：</b>${(content.商品リスト ?? []).length}件
-      `;
+      resultDiv.replaceChildren();
+      for (const text of ['✅ 記録しました！', '店舗名：' + (content.店舗名 ?? '-'), '日付：' + (content.日付 ?? '-'), '費目：' + (content.費目 ?? '-'), '商品数：' + (Array.isArray(content.商品リスト) ? content.商品リスト.length : 0)]) {
+        const row = document.createElement('p');
+        row.textContent = text;
+        resultDiv.append(row);
+      }
     } catch (e) {
       errorDiv.style.display = 'block';
       errorDiv.textContent = 'エラー: ' + e.message;
